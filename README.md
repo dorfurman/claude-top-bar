@@ -18,6 +18,21 @@ open CrabBar.app
 No Xcode project, no dependencies — `swiftc` over `Sources/` into an app bundle.
 Requires macOS 14+.
 
+## Versioning & updates
+
+`VERSION` is the single source of truth; `build.sh` bakes it into the bundle.
+The app checks this repo's latest GitHub release at most every 6 hours: a new
+version triggers one notification, an "Update to vX.Y.Z…" item in the
+right-click menu, and an update link in the popover footer — clicking any of
+them opens the release page. The repo must stay public for the unauthenticated
+check to work.
+
+To ship a release:
+
+```sh
+./release.sh [major|minor|patch]   # bump, build+test, tag, publish zip to GitHub
+```
+
 ## What it shows
 
 - **Hero percentage** of the 5-hour limit, with a severity meter (green → yellow → orange →
