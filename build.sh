@@ -39,13 +39,20 @@ swiftc -O \
   Sources/SelfTest.swift Sources/main.swift \
   -o "$APP/MacOS/CrabBar"
 
-# Sign with a real identity when one exists: keychain "Always Allow" binds to the
-# code signature, and an ad-hoc signature changes every rebuild, so only a stable
-# identity makes the approval stick. Ad-hoc fallback still fixes notifications and
-# launch-at-login, but re-prompts for the keychain after each rebuild.
-IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null \
-  | awk -F'"' '/Apple Development|Developer ID Application/ {print $2; exit}')
-codesign --force --sign "${IDENTITY:--}" --identifier com.dorf.crabbar CrabBar.app >/dev/null 2>&1 \
+# Personal project: sign ONLY with a Developer ID cert from the personal team below —
+# never any work certs also present in this keychain. Until that cert exists,
+# ad-hoc sign (works locally; keychain re-prompts after each rebuild, and Gatekeeper
+# blocks it on other Macs). Hardened runtime + timestamp are notarization requirements.
+TEAM=""   # personal Apple Developer team ID — set once the Developer ID cert is installed
+IDENTITY=""
+EXTRA=""
+if [ -n "$TEAM" ]; then
+  IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null \
+    | awk -F'"' -v t="($TEAM)" '/Developer ID Application/ && index($0, t) {print $2; exit}')
+  [ -n "$IDENTITY" ] && EXTRA="--options runtime --timestamp" \
+    || echo "warning: no Developer ID cert for team $TEAM; ad-hoc signing"
+fi
+codesign --force --sign "${IDENTITY:--}" $EXTRA --identifier com.dorf.crabbar CrabBar.app >/dev/null 2>&1 \
   || echo "warning: codesign failed; notifications and launch-at-login may not work"
 
 "$APP/MacOS/CrabBar" --test

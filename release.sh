@@ -24,6 +24,21 @@ echo "$V" > VERSION
 ZIP="CrabBar-$V.zip"
 ditto -c -k --keepParent CrabBar.app "$ZIP"
 
+# Notarize when the one-time setup exists (Developer ID cert + notary profile);
+# without it, ship unsigned-for-Gatekeeper and say so. Setup:
+#   xcrun notarytool store-credentials crabbar --apple-id <you> --team-id <TEAM> --password <app-specific>
+if codesign -dv CrabBar.app 2>&1 | grep -q "Developer ID" \
+   && xcrun notarytool history --keychain-profile crabbar >/dev/null 2>&1; then
+  echo "notarizing (takes a few minutes)…"
+  xcrun notarytool submit "$ZIP" --keychain-profile crabbar --wait | grep -q "status: Accepted" \
+    || { echo "notarization failed — check: xcrun notarytool log <id> --keychain-profile crabbar"; exit 1; }
+  # staple the ticket into the app so it opens offline, then re-zip the stapled app
+  xcrun stapler staple CrabBar.app >/dev/null
+  rm "$ZIP"; ditto -c -k --keepParent CrabBar.app "$ZIP"
+else
+  echo "warning: not notarized — Gatekeeper will block this zip on other Macs (see comment above)"
+fi
+
 git add VERSION
 git commit -m "release v$V"
 git tag "v$V"
