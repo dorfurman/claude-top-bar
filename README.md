@@ -25,6 +25,17 @@
 Signed and notarized — no Gatekeeper warnings. Requires macOS 14+ on Apple silicon.
 CrabBar checks for new releases and offers updates from the right-click menu.
 
+## Build from source
+
+Requires Xcode command line tools (Apple silicon).
+
+    git clone https://github.com/dorfurman/claude-top-bar
+    cd claude-top-bar
+    ./build.sh
+    open CrabBar.app
+
+Without a Developer ID cert the app is ad-hoc signed — fine on your own Mac.
+
 ## Features
 
 - **Real numbers, not estimates** — the percentage of your 5-hour limit comes straight
