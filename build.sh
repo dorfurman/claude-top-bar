@@ -16,7 +16,7 @@ cat > "$APP/Info.plist" <<PLIST
 <plist version="1.0"><dict>
   <key>CFBundleName</key><string>CrabBar</string>
   <key>CFBundleDisplayName</key><string>CrabBar</string>
-  <key>CFBundleIdentifier</key><string>com.dorf.crabbar</string>
+  <key>CFBundleIdentifier</key><string>com.furmanlabs.crabbar</string>
   <key>CFBundleExecutable</key><string>CrabBar</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
@@ -35,7 +35,7 @@ swiftc -O \
   -target arm64-apple-macosx14.0 \
   Sources/Usage.swift Sources/Sessions.swift Sources/Auth.swift Sources/API.swift Sources/Updates.swift Sources/Clawd.swift Sources/ClawdAnims.swift \
   Sources/Design.swift \
-  Sources/Popover.swift \
+  Sources/Popover.swift Sources/Game.swift \
   Sources/SelfTest.swift Sources/main.swift \
   -o "$APP/MacOS/CrabBar"
 
@@ -52,7 +52,7 @@ if [ -n "$TEAM" ]; then
   [ -n "$IDENTITY" ] && EXTRA="--options runtime --timestamp" \
     || echo "warning: no Developer ID cert for team $TEAM; ad-hoc signing"
 fi
-codesign --force --sign "${IDENTITY:--}" $EXTRA --identifier com.dorf.crabbar CrabBar.app >/dev/null 2>&1 \
+codesign --force --sign "${IDENTITY:--}" $EXTRA --identifier com.furmanlabs.crabbar CrabBar.app >/dev/null 2>&1 \
   || echo "warning: codesign failed; notifications and launch-at-login may not work"
 
 "$APP/MacOS/CrabBar" --test

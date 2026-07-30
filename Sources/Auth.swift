@@ -29,7 +29,7 @@ enum Auth {
 
     private static let base: [String: Any] = [
         kSecClass as String: kSecClassGenericPassword,
-        kSecAttrService as String: "com.dorf.crabbar",
+        kSecAttrService as String: "com.furmanlabs.crabbar",
         kSecAttrAccount as String: "oauth",
     ]
 

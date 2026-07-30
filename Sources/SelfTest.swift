@@ -254,6 +254,130 @@ func selfTest() {
         Clawd.groups.contains { $0.1 & (1 << UInt64(f)) != 0 }
     }, "no frame of Clawd may be blank")
 
+    // ---- game: hand-typed pose rects must stay inside their cell grid
+    for (name, a) in [("walk", GameCrab.walk), ("shoot", GameCrab.shoot), ("idle", GameCrab.idle)] {
+        check(a.seq.allSatisfy { $0 < a.uniq.count } && a.uniq.allSatisfy { runs in
+            stride(from: 0, to: runs.count, by: 5).allSatisfy {
+                runs[$0 + 1] + runs[$0 + 3] <= GameCrab.cellsWide
+                    && runs[$0 + 2] + runs[$0 + 4] <= Clawd.cellsHigh
+            }
+        }, "GameCrab.\(name) rects must stay inside the cell grid")
+    }
+    for s in Skin.allCases {   // outfit rects: inside the grid, colors inside the palette
+        check(stride(from: 0, to: s.outfit.count, by: 5).allSatisfy {
+            s.outfit[$0] < s.colors.count
+                && s.outfit[$0 + 1] + s.outfit[$0 + 3] <= GameCrab.cellsWide
+                && s.outfit[$0 + 2] + s.outfit[$0 + 4] <= Clawd.cellsHigh
+        }, "Skin.\(s.rawValue) outfit must stay inside the grid and palette")
+    }
+
+    // ---- game: the campaign table must be sane, in and past the hand-tuned rows
+    check(GameModel.stages.count == 30 && (1...60).allSatisfy { n in
+        let st = GameModel.stage(n)
+        return !st.name.isEmpty && st.pace > 0 && st.speed >= 1 && st.elite < 1
+            && !st.roster.isEmpty && st.roster.allSatisfy { $0.1 > 0 } && !st.boss.isEmpty
+    } && GameModel.stage(30).pace < GameModel.stage(1).pace
+      && GameModel.stage(30).speed > GameModel.stage(1).speed,
+    "the 30-stage table and OVERTIME scaling must be sane and get harder")
+
+    // game tests can bank random coin drops / kills / trophies into the real
+    // persisted state — snapshot, restore after the last game block
+    let wallet = (coins: UserDefaults.standard.integer(forKey: "gameCoins"),
+                  owned: UserDefaults.standard.stringArray(forKey: "gameSkinsOwned"),
+                  skin: UserDefaults.standard.string(forKey: "gameSkin"),
+                  ach: UserDefaults.standard.stringArray(forKey: "gameAch"),
+                  kills: UserDefaults.standard.integer(forKey: "gameKills"),
+                  best: UserDefaults.standard.integer(forKey: "gameBestStage"))
+
+    // ---- game: auto-fire downs a point-blank human; its bubble magnets in as xp
+    let g = GameModel()
+    g.sfx = false   // no sound effects out of the test run
+    g.reset()
+    g.nextSpawn = .infinity   // just the one hand-placed target, no random extras
+    g.enemies = [GameModel.Enemy(pos: CGPoint(x: g.crabX, y: 330), vel: .init(),
+                                 face: "🧑", shootAt: .infinity)]
+    for _ in 0..<30 { g.step(1.0 / 60) }    // 0.5s: auto-aim fires, covers the gap
+    check(g.enemies.isEmpty && g.score == 10, "auto-fire must down a human")
+    for _ in 0..<240 { g.step(1.0 / 60) }   // 4s: the xp bubble falls into magnet range
+    check(g.xp == 1, "a kill must drop one collectible xp bubble")
+
+    // ---- game: a full xp bar advances the stage and drops the boss in
+    g.reset()
+    g.nextSpawn = .infinity
+    g.xp = g.xpNext - 1
+    g.enemies = [GameModel.Enemy(pos: CGPoint(x: g.crabX, y: 330), vel: .init(),
+                                 face: "🧑", shootAt: .infinity)]
+    for _ in 0..<300 { g.step(1.0 / 60) }   // kill + collect the last bubble
+    check(g.level == 2 && g.scene == .playing
+          && g.enemies.contains { $0.kind == .boss },
+          "full xp bar must advance the stage and spawn the boss")
+
+    // ---- game: catching a 💣 wipes the field and the incoming fire
+    g.reset()
+    g.nextSpawn = .infinity
+    g.enemies = [CGPoint(x: 100, y: 100), CGPoint(x: 240, y: 120), CGPoint(x: 380, y: 100)]
+        .map { GameModel.Enemy(pos: $0, vel: .init(), face: "🧑", shootAt: .infinity) }
+    g.enemyShots = [GameModel.Shot(pos: CGPoint(x: 240, y: 200), vel: .init())]
+    g.drops = [GameModel.Drop(pos: g.crabPos, power: .bomb)]
+    g.step(1.0 / 60)
+    check(g.enemies.isEmpty && g.enemyShots.isEmpty, "a bomb must clear the field")
+
+    g.reset()
+    g.shotCD = .infinity                    // no return fire: the office must win
+    for _ in 0..<7200 { g.step(1.0 / 60) }  // 2min AFK: the swarm must finish Clawd
+    check(g.over && g.lives <= 0, "unopposed humans must win")
+
+    // ---- game: catching a BIG SHRIMP drop raises shot damage
+    g.reset()
+    g.nextSpawn = .infinity
+    g.drops = [GameModel.Drop(pos: g.crabPos, upgrade: .power)]
+    g.step(1.0 / 60)
+    check(g.power == 2, "catching BIG SHRIMP must raise shot damage")
+
+    // ---- game: a charged 🛡️ soaks a hit that would otherwise cost a life
+    g.reset()
+    g.nextSpawn = .infinity
+    g.shotCD = .infinity   // no auto-fire: the hit must land, the shell must soak
+    g.shell = true
+    g.enemies = [GameModel.Enemy(pos: g.crabPos, vel: .init(), face: "🧑",
+                                 shootAt: .infinity)]
+    g.step(1.0 / 60)
+    check(g.lives == 3 && g.shellAt >= 0, "a charged shell must soak the hit")
+
+    // ---- game: downing a stage boss pays the score bonus and a coin purse
+    g.reset()
+    g.nextSpawn = .infinity
+    let purse = g.coins
+    g.enemies = [GameModel.Enemy(pos: CGPoint(x: g.crabX, y: 300), vel: .init(),
+                                 kind: .boss, face: "🕴️", hp: 1, maxHp: 1,
+                                 shootAt: .infinity)]
+    for _ in 0..<40 { g.step(1.0 / 60) }
+    check(g.enemies.isEmpty && g.score == 12 * 10 + 250
+          && g.coinDrops.count + g.coins - purse == 3,
+          "a boss kill must pay the stage bonus and 3 coins")
+
+    // ---- game: a crab-coin magnets in and banks; the shop charges once and equips
+    g.reset()
+    g.nextSpawn = .infinity
+    let bank = g.coins
+    g.coinDrops = [GameModel.Bubble(pos: CGPoint(x: g.crabX, y: g.crabPos.y - 40),
+                                    vel: CGVector(dx: 0, dy: 45))]
+    for _ in 0..<60 { g.step(1.0 / 60) }
+    check(g.coinDrops.isEmpty && g.coins == bank + 1, "a crab-coin must magnet in and bank")
+    g.owned = []              // don't inherit the real wallet's purchases
+    g.coins = Skin.ocean.price
+    g.selectSkin(.ocean)
+    check(g.coins == 0 && g.skin == .ocean && g.owned.contains(Skin.ocean.rawValue),
+          "the shop must charge and equip")
+    g.selectSkin(.ocean)
+    check(g.coins == 0 && g.skin == .ocean, "re-equipping an owned skin must be free")
+    UserDefaults.standard.set(wallet.coins, forKey: "gameCoins")
+    UserDefaults.standard.set(wallet.owned, forKey: "gameSkinsOwned")
+    UserDefaults.standard.set(wallet.skin, forKey: "gameSkin")
+    UserDefaults.standard.set(wallet.ach, forKey: "gameAch")
+    UserDefaults.standard.set(wallet.kills, forKey: "gameKills")
+    UserDefaults.standard.set(wallet.best, forKey: "gameBestStage")
+
     // ---- formatting
     check(pct(27.4) == "27%" && pct(99.6) == "100%", "pct()")
     check(compact(1_500_000) == "1.5M" && compact(2400) == "2K", "compact()")

@@ -14,8 +14,9 @@ struct Window {
 struct Usage {
     var fiveHour: Window?
     var sevenDay: Window?
-    var sevenDayOpus: Window?
-    var sevenDaySonnet: Window?
+    /// Per-model weekly windows ("Opus", "Fable", …), one per seven_day_<model> key in the
+    /// response — no hard-coded model list, so new models show up without a code change.
+    var models: [(name: String, window: Window)] = []
     var fetchedAt = Date()
 }
 
@@ -116,10 +117,31 @@ private func send(token: String, _ done: @escaping (Result<Usage, UsageError>) -
         }
         guard let data, let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return done(.failure(.transport("unreadable response"))) }
+        if CommandLine.arguments.contains("--raw") {
+            print(String(data: data, encoding: .utf8) ?? "")
+        }
+        // claude.ai's own UI reads the `limits` array; scoped entries carry the display
+        // name ("Fable", …). Older responses only have flat seven_day_<model> keys.
+        var models = (o["limits"] as? [[String: Any]] ?? []).compactMap { l -> (String, Window)? in
+            guard let scope = l["scope"] as? [String: Any],
+                  let name = ((scope["model"] as? [String: Any])?["display_name"] as? String)
+                      ?? ((scope["surface"] as? [String: Any])?["display_name"] as? String),
+                  let p = l["percent"] as? NSNumber else { return nil }
+            return (name, Window(utilization: p.doubleValue,
+                                 resetsAt: (l["resets_at"] as? String).flatMap(parseDate)))
+        }
+        if models.isEmpty {
+            let prefix = "seven_day_"
+            models = o.keys.filter { $0.hasPrefix(prefix) }.sorted().compactMap { key in
+                window(o[key]).map {
+                    (String(key.dropFirst(prefix.count))
+                        .replacingOccurrences(of: "_", with: " ").capitalized, $0)
+                }
+            }
+        }
         done(.success(Usage(
             fiveHour: window(o["five_hour"]),
             sevenDay: window(o["seven_day"]),
-            sevenDayOpus: window(o["seven_day_opus"]),
-            sevenDaySonnet: window(o["seven_day_sonnet"]))))
+            models: models)))
     }.resume()
 }

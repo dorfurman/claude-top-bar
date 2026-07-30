@@ -63,6 +63,7 @@ struct UsageCard: View {
     var onSettings: () -> Void = {}
     var onQuit: () -> Void = {}
     var onRefresh: () -> Void = {}
+    var onGame: () -> Void = {}
 
     // Signed out, everything limit-related reads as absent — cached figures from the
     // previous login are stale, and the card's job is to say "sign in", not guess.
@@ -231,11 +232,10 @@ struct UsageCard: View {
     // MARK: Other windows
 
     private var otherWindows: [(String, Window)] {
-        guard Auth.isSignedIn else { return [] }
-        return [("Weekly · all models", usage?.sevenDay),
-                ("Weekly · Opus", usage?.sevenDayOpus),
-                ("Weekly · Sonnet", usage?.sevenDaySonnet)]
-            .compactMap { name, w in w.map { (name, $0) } }
+        guard Auth.isSignedIn, let u = usage else { return [] }
+        var rows = u.sevenDay.map { [("Weekly · all models", $0)] } ?? []
+        rows += u.models.map { ("Weekly · \($0.name)", $0.window) }
+        return rows
     }
 
     private var others: some View {
@@ -325,6 +325,7 @@ struct UsageCard: View {
             HStack(spacing: 4) {
                 iconButton("arrow.clockwise", "Refresh", action: onRefresh)
                 iconButton("gearshape", "Settings", action: onSettings)
+                iconButton("gamecontroller", "Crab Invaders — Clawd vs the humans", action: onGame)
                 Spacer()
                 iconButton("power", "Quit CrabBar", action: onQuit)
             }
@@ -363,6 +364,7 @@ struct SettingsCard: View {
     @State private var animate = Prefs.bool("animate", true)
     @State private var stunts = Prefs.int("stunts", -1)
     @State private var login = Prefs.bool("login", false)
+    @State private var autoGame = Prefs.bool("autoGame", false)
     var onLoginChange: (Bool) -> Void = { _ in }
 
     var body: some View {
@@ -402,8 +404,12 @@ struct SettingsCard: View {
                 }
                 .disabled(!animate)
             }
+            Section("Mini-game") {
+                Toggle("Launch Crab Invaders when Claude starts working", isOn: $autoGame)
+                    .onChange(of: autoGame) { _, v in UserDefaults.standard.set(v, forKey: "autoGame") }
+            }
             Section {
-                Toggle("Notify at 50% / 80% / 95%", isOn: $notify)
+                Toggle("Notify at 90%", isOn: $notify)
                     .onChange(of: notify) { _, v in UserDefaults.standard.set(v, forKey: "notify") }
                 Toggle("Launch at login", isOn: $login)
                     .onChange(of: login) { _, v in
@@ -413,6 +419,6 @@ struct SettingsCard: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 380, height: 540)
+        .frame(width: 380, height: 600)
     }
 }

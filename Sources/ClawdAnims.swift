@@ -134,12 +134,13 @@ enum ClawdAnims {
 }
 
 /// drawClawd's twin for the generated animations.
-func drawAnim(_ a: ClawdAnims.Anim, frame: Int, at origin: NSPoint, scale: CGFloat) {
+func drawAnim(_ a: ClawdAnims.Anim, frame: Int, at origin: NSPoint, scale: CGFloat,
+              colors: [NSColor] = Clawd.colors) {
     let n = a.seq.count
     let runs = a.uniq[a.seq[((frame % n) + n) % n]]
     let top = origin.y + CGFloat(Clawd.cellsHigh) * scale
     for i in stride(from: 0, to: runs.count, by: 5) {
-        Clawd.colors[runs[i]].setFill()
+        colors[runs[i]].setFill()
         NSRect(x: origin.x + CGFloat(runs[i + 1]) * scale,
                y: top - CGFloat(runs[i + 2] + runs[i + 4]) * scale,
                width: CGFloat(runs[i + 3]) * scale,

@@ -3,8 +3,11 @@ import ServiceManagement
 import SwiftUI
 import UserNotifications
 
-let CLAUDE_ROOT = FileManager.default.homeDirectoryForCurrentUser
-    .appendingPathComponent(".claude/projects")
+// CRABBAR_ROOT overrides the transcript root — used to stage README screenshots
+// from fabricated sessions instead of real (private) chat titles.
+let CLAUDE_ROOT = ProcessInfo.processInfo.environment["CRABBAR_ROOT"]
+    .map(URL.init(fileURLWithPath:))
+    ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude/projects")
 
 final class Bar: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -12,6 +15,7 @@ final class Bar: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     /// Kept for the lifetime of the app: see showCard().
     var host: NSHostingController<UsageCard>?
     var settingsWindow: NSWindow?
+    var gameWindow: NSWindow?
     var snap = Snapshot()
     var usage: Usage?
     var usageError: UsageError?
@@ -48,7 +52,16 @@ final class Bar: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         let editItem = NSMenuItem()
         editItem.submenu = edit
+        // The game window shows in the Dock like a real app; ⌘Q there should
+        // close the game, not kill the menu-bar app. ⌘W closes the key window.
+        let file = NSMenu(title: "File")
+        file.addItem(withTitle: "Close Window", action: #selector(NSWindow.performClose(_:)),
+                     keyEquivalent: "w")
+        file.addItem(withTitle: "Quit", action: #selector(quit), keyEquivalent: "q")
+        let fileItem = NSMenuItem()
+        fileItem.submenu = file
         let main = NSMenu()
+        main.addItem(fileItem)
         main.addItem(editItem)
         NSApp.mainMenu = main
 
@@ -180,9 +193,18 @@ final class Bar: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         }
     }
 
+    var wasWorking = false
+
     func apply(_ s: Snapshot) {
         snap = s
         snap.daily = weekDaily
+        // idle→working edge only, so closing the game mid-streak isn't overridden
+        // until Claude actually goes quiet and starts working again
+        let working = s.live.contains(where: \.working)
+        if working, !wasWorking, Prefs.bool("autoGame", false), gameWindow?.isVisible != true {
+            openGame()
+        }
+        wasWorking = working
         render()
         if popover.isShown { showCard() }
     }
@@ -237,7 +259,8 @@ final class Bar: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 self?.refreshBlock()
                 self?.refreshWeek()
                 self?.fetchUsageIfStale(olderThan: 5)
-            })
+            },
+            onGame: { [weak self] in self?.openGame() })
         // Reuse the hosting controller and hand it a new rootView: SwiftUI diffs the card in
         // place. Assigning a fresh controller to popover.contentViewController instead tears
         // the card down and rebuilds it, which flickers every time a refresh lands while the
@@ -273,6 +296,33 @@ final class Bar: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         item.menu = m
         item.button?.performClick(nil)
         item.menu = nil   // restore left-click-to-popover
+    }
+
+    /// ⌘Q with the game up closes just the game; otherwise it quits CrabBar.
+    @objc func quit() {
+        if gameWindow?.isVisible == true { gameWindow?.close() } else { NSApp.terminate(nil) }
+    }
+
+    @objc func openGame() {
+        popover.performClose(nil)
+        // rebuilt each time, like settings — a closed game is over, not paused
+        gameWindow?.close()
+        let w = NSWindow(contentViewController: NSHostingController(rootView: GameView()))
+        w.title = "Crab Invaders"
+        w.styleMask = [.titled, .closable, .resizable]
+        w.collectionBehavior = [.fullScreenPrimary]
+        w.setContentSize(NSSize(width: GameModel.W * 1.35, height: GameModel.H * 1.35))
+        w.isReleasedWhenClosed = false
+        gameWindow = w
+        w.center()
+        // show in the Dock / ⌘tab like a real app while the game is up
+        NSApp.setActivationPolicy(.regular)
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification, object: w, queue: .main) { _ in
+            NSApp.setActivationPolicy(.accessory)
+        }
+        w.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     @objc func openSettings() {
@@ -346,7 +396,7 @@ final class Bar: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             d.set(0, forKey: "notifyHighest")
         }
         let highest = d.integer(forKey: "notifyHighest")
-        guard let crossed = [95, 80, 50].first(where: { Int(w.utilization) >= $0 && $0 > highest })
+        guard let crossed = [90].first(where: { Int(w.utilization) >= $0 && $0 > highest })
         else { return }
         d.set(crossed, forKey: "notifyHighest")
 
@@ -419,6 +469,92 @@ final class Bar: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     print("wrote \(path)")
 }
 
+/// The badge animation as a looping GIF on a menu-bar strip, for the README.
+/// A few stunts back to back, each followed by the rest pose held for a beat.
+@MainActor func renderBadgeGif(to path: String) {
+    var live: Usage?
+    let sem = DispatchSemaphore(value: 0)
+    fetchUsage { if case .success(let u) = $0 { live = u }; sem.signal() }
+    _ = sem.wait(timeout: .now() + 20)
+
+    let stunts: [Stunt] = [.classic, .scuttle, .jump]
+    let sample = badgeImage(live, mode: .percentAndTime)
+    let size = NSSize(width: sample.size.width + 24, height: NSStatusBar.system.thickness)
+    let scale: CGFloat = 2
+
+    func frame(_ img: NSImage) -> CGImage? {
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: Int(size.width * scale),
+            pixelsHigh: Int(size.height * scale), bitsPerSample: 8, samplesPerPixel: 4,
+            hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+            bytesPerRow: 0, bitsPerPixel: 0) else { return nil }
+        rep.size = size
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        NSColor(hex: 0xEDEDED).setFill()   // light menu bar: the harder background
+        NSBezierPath(rect: NSRect(origin: .zero, size: size)).fill()
+        img.draw(at: NSPoint(x: 12, y: (size.height - img.size.height) / 2),
+                 from: .zero, operation: .sourceOver, fraction: 1)
+        NSGraphicsContext.restoreGraphicsState()
+        return rep.cgImage
+    }
+
+    // (image, seconds) — the rest pose is one long-delay frame, not 12 copies
+    var frames: [(CGImage, Double)] = []
+    for s in stunts {
+        for f in 0..<BadgeFrames.count {
+            if let c = frame(badgeImage(live, mode: .percentAndTime, frame: f, stunt: s)) {
+                frames.append((c, 1.0 / 12))
+            }
+        }
+        if let c = frame(badgeImage(live, mode: .percentAndTime)) { frames.append((c, 1.5)) }
+    }
+
+    guard let dest = CGImageDestinationCreateWithURL(
+        URL(fileURLWithPath: path) as CFURL, "com.compuserve.gif" as CFString,
+        frames.count, nil) else { print("gif failed"); return }
+    CGImageDestinationSetProperties(dest, [kCGImagePropertyGIFDictionary:
+        [kCGImagePropertyGIFLoopCount: 0]] as CFDictionary)
+    for (img, delay) in frames {
+        CGImageDestinationAddImage(dest, img, [kCGImagePropertyGIFDictionary:
+            [kCGImagePropertyGIFDelayTime: delay,
+             kCGImagePropertyGIFUnclampedDelayTime: delay]] as CFDictionary)
+    }
+    guard CGImageDestinationFinalize(dest) else { print("gif failed"); return }
+    print("wrote \(path)  (\(frames.count) frames)")
+}
+
+/// The game crab's poses on one strip — same reason --badge exists: eyeball
+/// hand-typed pixel data without launching the game.
+@MainActor func renderGameStrip(to path: String) {
+    // one column per distinct pose (idle's seq is long but mostly repeats)
+    let anims = [GameCrab.walk, GameCrab.shoot, GameCrab.idle]
+        .map { ClawdAnims.Anim(uniq: $0.uniq, seq: Array(0..<$0.uniq.count)) }
+    let cell = NSSize(width: CGFloat(GameCrab.cellsWide) * 3 + 12,
+                      height: CGFloat(Clawd.cellsHigh) * 3 + 12)
+    let maxFrames = anims.map(\.seq.count).max() ?? 0
+    let sheet = NSImage(size: NSSize(width: cell.width * CGFloat(maxFrames),
+                                     height: cell.height * CGFloat(anims.count)),
+                        flipped: false) { rect in
+        NSColor(hex: 0x1B1B1B).setFill()
+        NSBezierPath(rect: rect).fill()
+        for (row, a) in anims.enumerated() {
+            for f in 0..<a.seq.count {
+                drawAnim(a, frame: f,
+                         at: NSPoint(x: CGFloat(f) * cell.width + 6,
+                                     y: CGFloat(anims.count - 1 - row) * cell.height + 6),
+                         scale: 3)
+            }
+        }
+        return true
+    }
+    guard let tiff = sheet.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
+          let png = rep.representation(using: .png, properties: [:])
+    else { print("render failed"); return }
+    try? png.write(to: URL(fileURLWithPath: path))
+    print("wrote \(path)")
+}
+
 // MARK: - main
 
 let args = CommandLine.arguments
@@ -430,8 +566,9 @@ if args.contains("--test") {
     fetchUsage { r in
         switch r {
         case .success(let u):
-            for (name, w) in [("5-hour", u.fiveHour), ("7-day all", u.sevenDay),
-                              ("7-day opus", u.sevenDayOpus), ("7-day sonnet", u.sevenDaySonnet)] {
+            let rows: [(String, Window?)] = [("5-hour", u.fiveHour), ("7-day all", u.sevenDay)]
+                + u.models.map { ("7-day \($0.name.lowercased())", Optional($0.window)) }
+            for (name, w) in rows {
                 guard let w else { continue }
                 print(String(format: "%-14@ %5.1f%% used  resets %@", name as NSString,
                              w.utilization, w.resetsAt.map(dayTime) ?? "?"))
@@ -457,6 +594,12 @@ if args.contains("--test") {
 } else if let i = args.firstIndex(of: "--badge"), i + 1 < args.count {
     _ = NSApplication.shared
     MainActor.assumeIsolated { renderBadgeStrip(to: args[i + 1]) }
+} else if let i = args.firstIndex(of: "--gif"), i + 1 < args.count {
+    _ = NSApplication.shared
+    MainActor.assumeIsolated { renderBadgeGif(to: args[i + 1]) }
+} else if let i = args.firstIndex(of: "--game"), i + 1 < args.count {
+    _ = NSApplication.shared
+    MainActor.assumeIsolated { renderGameStrip(to: args[i + 1]) }
 } else {
     let app = NSApplication.shared
     let bar = Bar()
