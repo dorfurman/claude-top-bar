@@ -43,7 +43,7 @@ swiftc -O \
 # never any work certs also present in this keychain. Until that cert exists,
 # ad-hoc sign (works locally; keychain re-prompts after each rebuild, and Gatekeeper
 # blocks it on other Macs). Hardened runtime + timestamp are notarization requirements.
-TEAM=""   # personal Apple Developer team ID — set once the Developer ID cert is installed
+TEAM="23F3TUG54Q"   # personal Apple Developer team (Dor Furman, individual) — never a work team
 IDENTITY=""
 EXTRA=""
 if [ -n "$TEAM" ]; then
