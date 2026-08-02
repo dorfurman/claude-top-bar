@@ -27,7 +27,9 @@ ditto -c -k --keepParent CrabBar.app "$ZIP"
 # Notarize when the one-time setup exists (Developer ID cert + notary profile);
 # without it, ship unsigned-for-Gatekeeper and say so. Setup:
 #   xcrun notarytool store-credentials crabbar --apple-id <you> --team-id <TEAM> --password <app-specific>
-if codesign -dv CrabBar.app 2>&1 | grep -q "Developer ID" \
+# -dvv, not -dv: the Authority lines only print at the second verbosity level, so -dv never
+# matches and silently skips notarization (shipped unnotarized through v2.0.2 that way).
+if codesign -dvv CrabBar.app 2>&1 | grep -q "Authority=Developer ID Application" \
    && xcrun notarytool history --keychain-profile crabbar >/dev/null 2>&1; then
   echo "notarizing (takes a few minutes)…"
   xcrun notarytool submit "$ZIP" --keychain-profile crabbar --wait | grep -q "status: Accepted" \
