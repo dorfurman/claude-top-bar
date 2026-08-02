@@ -52,6 +52,50 @@ struct BigCrab: View {
     }
 }
 
+/// The "Claude finished" banner, shown in a borderless panel hanging off the menu bar item
+/// (see Bar.showToast). Same surface and hairline as the card, so it reads as the same app.
+struct ToastView: View {
+    let title: String
+    let message: String
+    /// Tapping the banner routes back to the chat's terminal tab; the ✗ just dismisses.
+    var onOpen: () -> Void = {}
+    var onClose: () -> Void = {}
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 9) {
+            Circle().fill(Color(P.good)).frame(width: 6, height: 6).padding(.top, 4)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.vPrimary)
+                Text(message)
+                    .font(.system(size: 10))
+                    .foregroundColor(.vSecondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundColor(.vMuted)
+                    .padding(4)          // a 16pt hit area for an 8pt glyph
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .frame(width: 240, alignment: .leading)
+        .contentShape(Rectangle())       // the gaps are clickable too, not just the text
+        .onTapGesture(perform: onOpen)
+        .background(Color.vSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.vBorder, lineWidth: 1))
+        .environment(\.colorScheme, .dark)
+    }
+}
+
 // MARK: - Card
 
 struct UsageCard: View {
@@ -64,6 +108,9 @@ struct UsageCard: View {
     var onQuit: () -> Void = {}
     var onRefresh: () -> Void = {}
     var onGame: () -> Void = {}
+    var onChat: (String?) -> Void = { _ in }
+    /// id of the chat row under the cursor — the only reason this view has state
+    @State private var hovered: String?
 
     // Signed out, everything limit-related reads as absent — cached figures from the
     // previous login are stale, and the card's job is to say "sign in", not guess.
@@ -292,7 +339,17 @@ struct UsageCard: View {
                         .foregroundColor(s.working ? Color(P.good) : .vMuted)
                         .monospacedDigit()
                 }
-                .help("\(s.project) · \(s.title)")
+                // the row is a link back to its terminal; padding gives the hover fill
+                // somewhere to live and widens the target past the text itself
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(hovered == s.id ? Color.vGridline : .clear)
+                .clipShape(RoundedRectangle(cornerRadius: 5))
+                .padding(.horizontal, -6)
+                .contentShape(Rectangle())
+                .onHover { hovered = $0 ? s.id : (hovered == s.id ? nil : hovered) }
+                .onTapGesture { onChat(s.cwd) }
+                .help("\(s.project) · \(s.title) — click to open in your terminal")
             }
             if snap.live.count > 5 {
                 Text("+ \(snap.live.count - 5) more")
@@ -359,12 +416,9 @@ struct UsageCard: View {
 
 struct SettingsCard: View {
     let status: String
-    @State private var mode = BadgeMode(rawValue: Prefs.int("badgeMode", 0)) ?? .percentAndTime
     @State private var notify = Prefs.bool("notify", true)
-    @State private var animate = Prefs.bool("animate", true)
-    @State private var stunts = Prefs.int("stunts", -1)
+    @State private var notifyDone = Prefs.bool("notifyDone", true)
     @State private var login = Prefs.bool("login", false)
-    @State private var autoGame = Prefs.bool("autoGame", false)
     var onLoginChange: (Bool) -> Void = { _ in }
 
     var body: some View {
@@ -381,36 +435,11 @@ struct SettingsCard: View {
                     }
                 }
             }
-            Section("Menu bar") {
-                Picker("Show", selection: $mode) {
-                    ForEach(BadgeMode.allCases, id: \.rawValue) { m in
-                        Text(m.label).tag(m)
-                    }
-                }
-                .onChange(of: mode) { _, new in
-                    UserDefaults.standard.set(new.rawValue, forKey: "badgeMode")
-                }
-                Toggle("Animate the crab", isOn: $animate)
-                    .onChange(of: animate) { _, v in UserDefaults.standard.set(v, forKey: "animate") }
-            }
-            Section("Tricks") {
-                ForEach(Stunt.allCases, id: \.rawValue) { s in
-                    Toggle(s.label, isOn: Binding(
-                        get: { stunts & (1 << s.rawValue) != 0 },
-                        set: { on in
-                            stunts = on ? stunts | (1 << s.rawValue) : stunts & ~(1 << s.rawValue)
-                            UserDefaults.standard.set(stunts, forKey: "stunts")
-                        }))
-                }
-                .disabled(!animate)
-            }
-            Section("Mini-game") {
-                Toggle("Launch Crab Invaders when Claude starts working", isOn: $autoGame)
-                    .onChange(of: autoGame) { _, v in UserDefaults.standard.set(v, forKey: "autoGame") }
-            }
             Section {
                 Toggle("Notify at 90%", isOn: $notify)
                     .onChange(of: notify) { _, v in UserDefaults.standard.set(v, forKey: "notify") }
+                Toggle("Notify when Claude finishes working", isOn: $notifyDone)
+                    .onChange(of: notifyDone) { _, v in UserDefaults.standard.set(v, forKey: "notifyDone") }
                 Toggle("Launch at login", isOn: $login)
                     .onChange(of: login) { _, v in
                         UserDefaults.standard.set(v, forKey: "login")
@@ -419,6 +448,6 @@ struct SettingsCard: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 380, height: 600)
+        .frame(width: 380, height: 320)
     }
 }

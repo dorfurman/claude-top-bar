@@ -9,6 +9,13 @@ let CLAUDE_ROOT = ProcessInfo.processInfo.environment["CRABBAR_ROOT"]
     .map(URL.init(fileURLWithPath:))
     ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude/projects")
 
+/// A borderless window is not key-eligible by default, and its buttons then ignore clicks.
+final class ToastPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    /// Per-banner, so one stacked toast timing out doesn't cut another's time short.
+    var dismiss: Timer?
+}
+
 final class Bar: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     let popover = NSPopover()
@@ -16,6 +23,10 @@ final class Bar: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     var host: NSHostingController<UsageCard>?
     var settingsWindow: NSWindow?
     var gameWindow: NSWindow?
+    /// Live banners, top-down in stacking order, plus the corner they hang from.
+    var toasts: [ToastPanel] = []
+    var toastX: CGFloat = 0
+    var toastTop: CGFloat = 0
     var snap = Snapshot()
     var usage: Usage?
     var usageError: UsageError?
@@ -96,6 +107,20 @@ final class Bar: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         checkForUpdates()
 
         syncAnimation()
+
+        // CRABBAR_TOAST=1: fire one banner at launch, to check the drawing and placement
+        // without waiting on a real session to finish.
+        // CRABBAR_TOAST=n fires n of them, a beat apart, to check the stack.
+        if let n = ProcessInfo.processInfo.environment["CRABBAR_TOAST"].map({ Int($0) ?? 1 }) {
+            let cwd = FileManager.default.currentDirectoryPath
+            for i in 0..<max(1, n) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1 + Double(i) * 0.7) { [weak self] in
+                    self?.showToast("Claude finished · \(URL(fileURLWithPath: cwd).lastPathComponent)",
+                                    "toast placement check \(i + 1)", cwd: cwd)
+                }
+            }
+        }
+
         // Settings writes straight to UserDefaults; this is what makes a changed badge mode
         // or animation toggle land now instead of on the next 15s tick.
         NotificationCenter.default.addObserver(
@@ -194,10 +219,13 @@ final class Bar: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     var wasWorking = false
+    /// Sessions seen working on the previous scan, for the working→done edge.
+    var workingIds: Set<String> = []
 
     func apply(_ s: Snapshot) {
         snap = s
         snap.daily = weekDaily
+        notifyFinished(s.live)
         // idle→working edge only, so closing the game mid-streak isn't overridden
         // until Claude actually goes quiet and starts working again
         let working = s.live.contains(where: \.working)
@@ -260,7 +288,11 @@ final class Bar: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 self?.refreshWeek()
                 self?.fetchUsageIfStale(olderThan: 5)
             },
-            onGame: { [weak self] in self?.openGame() })
+            onGame: { [weak self] in self?.openGame() },
+            onChat: { [weak self] cwd in
+                self?.popover.performClose(nil)
+                DispatchQueue.global(qos: .userInitiated).async { focusSession(cwd: cwd) }
+            })
         // Reuse the hosting controller and hand it a new rootView: SwiftUI diffs the card in
         // place. Assigning a fresh controller to popover.contentViewController instead tears
         // the card down and rebuilds it, which flickers every time a refresh lands while the
@@ -381,6 +413,89 @@ final class Bar: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     func askForNotifications() {
         guard Bundle.main.bundleIdentifier != nil else { return }
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert]) { _, _ in }
+    }
+
+    /// One notification per session when the agent stops working. The transcript must have
+    /// been written within WORKING_TTL — a session demoted for going silent (Esc, crashed
+    /// CLI) didn't finish anything, so it shouldn't announce that it did.
+    func notifyFinished(_ live: [LiveSession]) {
+        let now = Set(live.filter(\.working).map(\.id))
+        defer { workingIds = now }
+        guard Prefs.bool("notifyDone", true) else { return }
+        for s in live where workingIds.contains(s.id) && !now.contains(s.id)
+            && Date().timeIntervalSince(s.modified) < WORKING_TTL {
+            showToast("Claude finished · \(s.project)", s.title, cwd: s.cwd)
+        }
+    }
+
+    /// A banner under the pill instead of a Notification Center alert: no permission prompt,
+    /// no Do-Not-Disturb, and it points at the thing it's talking about. Several chats can
+    /// finish in the same 15s scan, so banners stack downward, newest at the bottom, each on
+    /// its own dismiss timer; the survivors slide up as one goes away.
+    func showToast(_ title: String, _ message: String, cwd: String? = nil) {
+        guard let button = item.button, let bar = button.window else { return }
+        let p = ToastPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel],
+                           backing: .buffered, defer: false)
+        let host = NSHostingView(rootView: ToastView(
+            title: title, message: message,
+            onOpen: { [weak self] in
+                self?.hideToast(p)
+                // lsof / ps / AppleScript: off the main thread, the click shouldn't wait
+                DispatchQueue.global(qos: .userInitiated).async { focusSession(cwd: cwd) }
+            },
+            onClose: { [weak self] in self?.hideToast(p) }))
+        host.layout()
+        let size = host.fittingSize
+        let anchor = bar.convertToScreen(button.convert(button.bounds, to: nil))
+        // right-align under the pill, but never off the right edge of the screen
+        let limit = (button.window?.screen ?? NSScreen.main)?.visibleFrame.maxX ?? anchor.maxX
+        toastX = min(anchor.maxX, limit) - size.width
+        toastTop = anchor.minY - 6
+
+        p.contentView = host
+        p.setFrame(NSRect(x: toastX, y: toastTop - size.height, width: size.width, height: size.height),
+                   display: false)
+        p.isOpaque = false
+        p.backgroundColor = .clear
+        p.hasShadow = true
+        p.level = .statusBar
+        p.isFloatingPanel = true
+        p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        p.alphaValue = 0
+
+        toasts.append(p)
+        // A quiet hour of finished chats shouldn't wall off the screen; the oldest goes.
+        while toasts.count > 4, let old = toasts.first { hideToast(old) }
+        stackToasts()
+        p.orderFrontRegardless()
+        NSAnimationContext.runAnimationGroup { $0.duration = 0.15; p.animator().alphaValue = 1 }
+
+        // .common so the countdown keeps running while a menu or the popover tracks events
+        let t = Timer(timeInterval: 6, repeats: false) { [weak self] _ in self?.hideToast(p) }
+        RunLoop.main.add(t, forMode: .common)
+        p.dismiss = t
+    }
+
+    /// Lays the live banners out top-down from under the pill. Animated, so a dismissal in
+    /// the middle of the stack closes its gap instead of leaving a hole.
+    private func stackToasts() {
+        var y = toastTop
+        for p in toasts {
+            y -= p.frame.height
+            let f = NSRect(x: toastX, y: y, width: p.frame.width, height: p.frame.height)
+            if p.frame != f { p.animator().setFrame(f, display: true) }
+            y -= 6
+        }
+    }
+
+    func hideToast(_ p: ToastPanel) {
+        p.dismiss?.invalidate()
+        p.dismiss = nil
+        guard let i = toasts.firstIndex(of: p) else { return }   // already going away
+        toasts.remove(at: i)
+        NSAnimationContext.runAnimationGroup({ $0.duration = 0.2
+                                              p.animator().alphaValue = 0 }) { p.close() }
+        stackToasts()
     }
 
     /// Fires once per threshold per window; the crossed set resets when the window rolls.
