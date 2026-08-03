@@ -31,9 +31,13 @@ enum Updates {
         let me = Bundle.main.bundleURL
         let fm = FileManager.default
 
-        // Same bundle id = another copy of us, holding its own status item.
+        // Same bundle id = another copy of us, holding its own status item. Filter by pid, not
+        // by NSRunningApplication.current — that reports pid -1 until LaunchServices has us
+        // registered, and matching on it let 2.0.3 SIGKILL itself two seconds into launch.
+        let mine = ProcessInfo.processInfo.processIdentifier
         for app in NSRunningApplication.runningApplications(
-                withBundleIdentifier: Bundle.main.bundleIdentifier ?? "") where app != .current {
+                withBundleIdentifier: Bundle.main.bundleIdentifier ?? "")
+                where app.processIdentifier != mine && app.processIdentifier > 0 {
             app.terminate()
             // The move below replaces its bundle, so let it actually go first.
             for _ in 0..<40 where !app.isTerminated { usleep(50_000) }
@@ -53,6 +57,10 @@ enum Updates {
                                        .appendingPathComponent("build.sh").path)
         else { return }
 
+        // Clear the download flag here, where the bundle is definitely ours to write — after the
+        // move, /Applications is App Management territory and the same call can come back EPERM.
+        _ = sh("/usr/bin/xattr", ["-dr", "com.apple.quarantine", me.path])
+
         do {
             if fm.fileExists(atPath: installed.path) { try fm.removeItem(at: installed) }
             // Launched straight from the download, Gatekeeper translocates us to a read-only
@@ -62,9 +70,20 @@ enum Updates {
         } catch {
             return   // no write access to /Applications — keep running where we are
         }
-        // Relaunch from the new path: Bundle.main (and the login item it registers) still
-        // points at the bundle we just moved out from under ourselves.
-        _ = try? Process.run(URL(fileURLWithPath: "/usr/bin/open"), arguments: ["-n", installed.path])
+        relaunch()
+    }
+
+    /// Start /Applications/CrabBar.app and hand over. Two things bite here, both learned the
+    /// hard way in 2.0.3: a copy carries the download's com.apple.quarantine flag, and
+    /// LaunchServices refuses to open a quarantined bundle it didn't see the user move
+    /// (`open` fails with ENOENT and nothing appears) — so clear the flag first. If `open`
+    /// still balks, spawn the executable directly rather than leaving the user with no app.
+    static func relaunch() -> Never {
+        _ = sh("/usr/bin/xattr", ["-dr", "com.apple.quarantine", installed.path])
+        if !sh("/usr/bin/open", ["-n", installed.path]).ok {
+            _ = try? Process.run(installed.appendingPathComponent("Contents/MacOS/CrabBar"),
+                                 arguments: [])
+        }
         exit(0)
     }
 
@@ -97,8 +116,19 @@ enum Updates {
                     return
                 }
                 status("Restarting…")
-                _ = try? Process.run(URL(fileURLWithPath: "/usr/bin/open"),
-                                     arguments: ["-n", app.path])
+                // Straight into /Applications ourselves — that path is already verified, and
+                // handing the temp copy to `open` puts us back at the mercy of the quarantine
+                // and translocation rules that broke the 2.0.3 handover.
+                let fm = FileManager.default
+                do {
+                    if fm.fileExists(atPath: installed.path) { try fm.removeItem(at: installed) }
+                    try fm.moveItem(at: app, to: installed)
+                } catch {
+                    status("Couldn't replace \(installed.path)")
+                    u.open()
+                    return
+                }
+                relaunch()
             }
         }.resume()
     }
