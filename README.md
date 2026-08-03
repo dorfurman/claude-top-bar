@@ -1,16 +1,17 @@
-```
-   ____           _     ____
-  / ___|_ __ __ _| |__ | __ )  __ _ _ __
- | |   | '__/ _` | '_ \|  _ \ / _` | '__|
- | |___| | | (_| | |_) | |_) | (_| | |
-  \____|_|  \__,_|_.__/|____/ \__,_|_|     (\/)
-                                           (oo)
-```
+<div align="center"><pre>
+&nbsp;&nbsp;&nbsp;____&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;_&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;____&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+&nbsp;&nbsp;/&nbsp;___|_&nbsp;__&nbsp;__&nbsp;_|&nbsp;|__&nbsp;|&nbsp;__&nbsp;)&nbsp;&nbsp;__&nbsp;_&nbsp;_&nbsp;__&nbsp;
+&nbsp;|&nbsp;|&nbsp;&nbsp;&nbsp;|&nbsp;'__/&nbsp;_`&nbsp;|&nbsp;'_&nbsp;\|&nbsp;&nbsp;_&nbsp;\&nbsp;/&nbsp;_`&nbsp;|&nbsp;'__|
+&nbsp;|&nbsp;|___|&nbsp;|&nbsp;|&nbsp;(_|&nbsp;|&nbsp;|_)&nbsp;|&nbsp;|_)&nbsp;|&nbsp;(_|&nbsp;|&nbsp;|&nbsp;&nbsp;&nbsp;
+&nbsp;&nbsp;\____|_|&nbsp;&nbsp;\__,_|_.__/|____/&nbsp;\__,_|_|&nbsp;&nbsp;&nbsp;
+</pre></div>
 
-# CrabBar
+<h1 align="center">CrabBar</h1>
 
-**🦀 Claude Code usage, live in your macOS menu bar**
-*Real limit percentages, reset times, projections, and live chats — one click away*
+<p align="center">
+  <b>🦀 Claude Code usage, live in your macOS menu bar</b><br>
+  <i>Real limit percentages, reset times, projections, and live chats — one click away</i>
+</p>
 
 <p align="center">
   <img src="docs/icon.png" width="128" alt="CrabBar icon">
