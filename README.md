@@ -1,11 +1,19 @@
+```
+   ____           _     ____
+  / ___|_ __ __ _| |__ | __ )  __ _ _ __
+ | |   | '__/ _` | '_ \|  _ \ / _` | '__|
+ | |___| | | (_| | |_) | |_) | (_| | |
+  \____|_|  \__,_|_.__/|____/ \__,_|_|     (\/)
+                                           (oo)
+```
+
+# CrabBar
+
+**🦀 Claude Code usage, live in your macOS menu bar**
+*Real limit percentages, reset times, projections, and live chats — one click away*
+
 <p align="center">
   <img src="docs/icon.png" width="128" alt="CrabBar icon">
-</p>
-
-<h1 align="center">CrabBar</h1>
-
-<p align="center">
-  Claude Code usage, live in your macOS menu bar.
 </p>
 
 <p align="center">
