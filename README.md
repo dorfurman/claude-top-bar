@@ -23,7 +23,9 @@
 3. Launch it, click the pill, and sign in with Claude
 
 Signed and notarized — no Gatekeeper warnings. Requires macOS 14+ on Apple silicon.
-CrabBar checks for new releases and offers updates from the right-click menu.
+Later updates install themselves: click the update line in the popover (or the right-click
+menu) and CrabBar downloads the new release, replaces itself in **Applications**, and restarts —
+no second copy, no second menu bar icon.
 
 ## Build from source
 

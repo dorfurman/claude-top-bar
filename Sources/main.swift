@@ -317,7 +317,7 @@ final class Bar: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     func showMenu() {
         let m = NSMenu()
         if let u = Updates.available {
-            m.addItem(withTitle: "⬆ Update to v\(u.version)…", action: #selector(openUpdate), keyEquivalent: "").target = self
+            m.addItem(withTitle: "⬆ Install v\(u.version) & restart", action: #selector(openUpdate), keyEquivalent: "").target = self
             m.addItem(.separator())
         }
         m.addItem(withTitle: "Refresh Now", action: #selector(refreshBlock), keyEquivalent: "r").target = self
@@ -400,13 +400,17 @@ final class Bar: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         Updates.check { u in
             let c = UNMutableNotificationContent()
             c.title = "CrabBar \(u.version) is available"
-            c.body = "You're on \(Updates.current) · right-click the pill to update."
+            c.body = "You're on \(Updates.current) · right-click the pill to install it."
             UNUserNotificationCenter.current().add(
                 UNNotificationRequest(identifier: "crab-update-\(u.version)", content: c, trigger: nil))
         }
     }
 
-    @objc func openUpdate() { Updates.available?.open() }
+    /// Downloads and installs in place; the app relaunches itself when it lands.
+    @objc func openUpdate() {
+        guard let u = Updates.available else { return }
+        Updates.install(u)
+    }
 
     // MARK: Notifications
 
@@ -716,6 +720,7 @@ if args.contains("--test") {
     _ = NSApplication.shared
     MainActor.assumeIsolated { renderGameStrip(to: args[i + 1]) }
 } else {
+    Updates.consolidate()   // one copy of us, in /Applications — before any UI exists
     let app = NSApplication.shared
     let bar = Bar()
     app.delegate = bar

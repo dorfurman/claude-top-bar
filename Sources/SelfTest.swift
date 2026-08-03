@@ -378,6 +378,16 @@ func selfTest() {
     UserDefaults.standard.set(wallet.kills, forKey: "gameKills")
     UserDefaults.standard.set(wallet.best, forKey: "gameBestStage")
 
+    // ---- duplicate-copy detection (the "CrabBar 2.app" sweep deletes what this matches)
+    check(Updates.isOurBundle(Bundle.main.bundleURL)
+          && !Updates.isOurBundle(URL(fileURLWithPath: "/System/Applications/Music.app"))
+          && !Updates.isOurBundle(URL(fileURLWithPath: "/Applications")),
+          "isOurBundle() must match only our own bundle id")
+
+    // an update that isn't our signed zip must never come back as launchable
+    check(Updates.unpack(URL(fileURLWithPath: "/etc/hosts")) == nil,
+          "unpack() must reject anything that isn't our signed CrabBar.app")
+
     // ---- formatting
     check(pct(27.4) == "27%" && pct(99.6) == "100%", "pct()")
     check(compact(1_500_000) == "1.5M" && compact(2400) == "2K", "compact()")

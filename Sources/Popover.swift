@@ -109,8 +109,10 @@ struct UsageCard: View {
     var onRefresh: () -> Void = {}
     var onGame: () -> Void = {}
     var onChat: (String?) -> Void = { _ in }
-    /// id of the chat row under the cursor — the only reason this view has state
+    /// id of the chat row under the cursor
     @State private var hovered: String?
+    /// non-nil once the update button is pressed: download → install → restart
+    @State private var updateStatus: String?
 
     // Signed out, everything limit-related reads as absent — cached figures from the
     // previous login are stale, and the card's job is to say "sign in", not guess.
@@ -370,13 +372,14 @@ struct UsageCard: View {
                     .foregroundColor(.vMuted)
                     .fixedSize(horizontal: false, vertical: true)
                 if let u = Updates.available {
-                    Button(action: u.open) {
-                        Text("Update available — v\(u.version) ↗")
+                    Button { Updates.install(u) { updateStatus = $0 } } label: {
+                        Text(updateStatus ?? "Update available — install v\(u.version)")
                             .font(.system(size: 10, weight: .semibold))
                             .foregroundColor(.vPrimary)
                     }
                     .buttonStyle(.plain)
-                    .help("Opens the release page. You're on v\(Updates.current).")
+                    .disabled(updateStatus != nil)
+                    .help("Downloads v\(u.version) and restarts. You're on v\(Updates.current).")
                 }
             }
             HStack(spacing: 4) {
